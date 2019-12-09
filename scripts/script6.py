@@ -33,17 +33,17 @@ channel = pathloss_channel(prop_coef)
 sigma = 1e-6        # awgn variance
 
 # simulation
-sim_type = system_simulation_type_enum.MULTIPLE_D2D_PAIRS
+sim_type = system_simulation_type_enum.SHITTY_DISTRIBUTION
 
 sim1 = system_simulation(sim_type, lower_lim_uc_db, lower_lim_d2d_db, sinr_margin, n_orthogonal_resources, n_mues, n_d2d, bs, allocation_algorithm=allocation_algorithm_enum.RANDOM)
 
 sim2 = system_simulation(sim_type, lower_lim_uc_db, lower_lim_d2d_db, sinr_margin, n_orthogonal_resources, n_mues, n_d2d, bs, allocation_algorithm=allocation_algorithm_enum.LOWEST_AVAILABILITY)
 
 # simulation execution
-n_loops = 1e4
+n_loops = 1e3
 d2d_distances_list = np.linspace(0, bs.radius/2, 20)
-allocation_avg_rnd, distances_appearances_rnd = sim1.run_loops(int(n_loops), d2d_distances_list)
-allocation_avg_pbd, distances_appearances_pbd = sim2.run_loops(int(n_loops), d2d_distances_list)
+allocation_avg_rnd = sim1.run_loops(int(n_loops), d2d_distances_list)
+allocation_avg_pbd = sim2.run_loops(int(n_loops), d2d_distances_list)
 
 plt.figure(1)
 plt.plot(d2d_distances_list, allocation_avg_rnd, label='SR')
@@ -52,17 +52,11 @@ plt.xlabel('Distância do enlace D2D [m]')
 plt.ylabel('Razão de alocação')
 plt.legend()
 
-plt.figure(2)
-plt.bar([2*(i+1) for i in range(len(d2d_distances_list))], distances_appearances_rnd, align='center', tick_label= [ f'{i:.3g}' for i in d2d_distances_list] )
-plt.xlabel('Distâncias do enlace D2D [m]')
-plt.ylabel('Ocorrências')
-plt.title('SR')
-
-plt.figure(3)
-plt.bar([2*(i+1) for i in range(len(d2d_distances_list))], distances_appearances_pbd, align='center', tick_label= [ f'{i:.3g}' for i in d2d_distances_list] )
-plt.xlabel('Distâncias do enlace D2D [m]')
-plt.ylabel('Ocorrências')
-plt.title('PBD')
+# plt.figure(2)
+# plt.bar([2*(i+1) for i in range(len(d2d_distances_list))], distances_appearances_rnd, align='center', tick_label= [ f'{i:.3g}' for i in d2d_distances_list] )
+# plt.xlabel('Distâncias do enlace D2D [m]')
+# plt.ylabel('Ocorrências')
+# plt.title('SR')
 
 plt.show()
 

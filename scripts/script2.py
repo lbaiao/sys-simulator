@@ -43,7 +43,7 @@ allocation_rates = sim.run_loops(int(n_loops), pair_distances)
 
 norm_distances = [i/bs.radius for i in pair_distances]
 
-# plot stuff'
+# plot stuff
 plt.plot(norm_distances,allocation_rates['d2d_dcrit'], '-o', label='Critical distance method')
 plt.plot(norm_distances,allocation_rates['d2d_sinr'], '-d', label='SINR method')
 plt.xlabel('D2D pair distance normalized [d/R]')

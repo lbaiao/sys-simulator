@@ -22,7 +22,8 @@ class system_simulation_type_enum(Enum):
     VARYING_BS_RADIUS = 0,
     SINGLE_D2D_PAIR_SAME_NOISE = 1,
     SINGLE_D2D_PAIR_DIFFERENT_NOISE = 2,
-    MULTIPLE_D2D_PAIRS = 3
+    MULTIPLE_D2D_PAIRS = 3,
+    SHITTY_DISTRIBUTION = 4
 
 class allocation_algorithm_enum(Enum):
     RANDOM = 0,
@@ -39,6 +40,8 @@ class system_simulation:
             self.run_loops = self.__run_loops_single_pair
         elif sim_type == system_simulation_type_enum.MULTIPLE_D2D_PAIRS:
             self.run_loops = self.__run_loops_multiple_pairs
+        elif sim_type == system_simulation_type_enum.SHITTY_DISTRIBUTION:
+            self.run_loops = self.__run_loops_shitty_dist
         self.lower_lim_uc_db = lower_lim_uc_db
         self.lower_lim_uc = 10**(lower_lim_uc_db/10)
         self.lower_lim_d2d_db = lower_lim_d2d_db
@@ -50,10 +53,10 @@ class system_simulation:
         self.bs = bs        
         if kwargs.get('allocation_algorithm') is not None:            
             if kwargs['allocation_algorithm'] == allocation_algorithm_enum.RANDOM:
-                self.allocation_algorithm = self.__random_allocation
+                self.__allocation_algorithm = self.__random_allocation
             if kwargs['allocation_algorithm'] == allocation_algorithm_enum.LOWEST_AVAILABILITY:            
-                self.allocation_algorithm = self.__low_disponibility_priority
-        else: self.allocation_algorithm = self.__random_allocation
+                self.__allocation_algorithm = self.__low_disponibility_priority
+        else: self.__allocation_algorithm = self.__random_allocation
 
     def get_snr_uc(self, p_uc, pathloss, noise):
         return p_uc*pathloss/noise
@@ -83,11 +86,6 @@ class system_simulation:
                 break
             allocation_table[f'RB:{i}'] = nodes[i].id        
         return allocation_table
-
-    # def allocate_resources_d2d_sequential(self,dues_txs,d2d_access_table,mues,mues_allocation_table):
-    #     dues_allocation_table = dict()
-    #     for node in dues_txs:
-    #         pass
 
     def d2d_critical_distance(self,margin, channel, lower_d2d_sinr, lower_mue_sinr, uc_bs_distance, uc_d2d_distance, d2d_bs_distance):
         d_crit = d2d_bs_distance*(margin/(lower_d2d_sinr*(1+lower_mue_sinr*(uc_bs_distance/uc_d2d_distance)**channel.prop_coef*(1+margin))))**(1/channel.prop_coef)
@@ -236,21 +234,20 @@ class system_simulation:
 
     def __random_allocation(self, allocation_matrix):
         allocation_matrix = np.array(allocation_matrix)
-        n_mues = list(range(allocation_matrix.shape[0]))
-        n_dues = list(range(allocation_matrix.shape[1]))
+        n_mues = range(allocation_matrix.shape[0])
+        n_dues = range(allocation_matrix.shape[1])
         allocation_vector = np.zeros(allocation_matrix.shape[1], dtype='int')
         for i in n_mues:
             for j in n_dues:
                 if allocation_matrix[i][j] > 0:
                     allocation_vector[j] = 1
-                    n_dues.pop(n_dues.index(j))
-                    n_mues.pop(n_mues.index(i))
+                    allocation_matrix[:, j] = 0
+                    allocation_matrix[i, :] = 0
                     break
         return allocation_vector
 
     def __low_disponibility_priority(self, allocation_matrix):
-        allocation_matrix = np.array(allocation_matrix)
-        n_dues = allocation_matrix.shape[1]
+        allocation_matrix = np.array(allocation_matrix)        
         allocation_vector = np.zeros(allocation_matrix.shape[1], dtype='int')
         while(allocation_matrix.sum()>0):
             aux = allocation_matrix.sum(axis=0)
@@ -261,6 +258,42 @@ class system_simulation:
             allocation_matrix[mue_index,:] = 0
             allocation_matrix[:, min_index] = 0
         return allocation_vector
+
+    def __run_multiple_pairs_shitty_distribution(self, pair_distance):
+        lower_lim_uc = 10**(self.lower_lim_uc_db/10) # sinr lower bound for MUEs in dB
+        lower_lim_d2d = 10**(self.lower_lim_d2d_db/10)  # sinr lower bound for DUEs
+
+        # channel specifications
+        prop_coef = 3.5       # propagation coefficient
+        channel = pathloss_channel(prop_coef)
+
+        # noise specifications
+        sigma = 1e-6        # awgn variance        
+
+        mues = [mobile_user(x) for x in range(self.n_mues)]    # mobile users
+
+        range1 = range(self.n_d2d//2)
+
+        dues_tx = [d2d_user(i,type=d2d_node_type.TX) for i in range1]        
+        dues_rx = [d2d_user(i,type=d2d_node_type.RX) for i in range1]        
+
+        for i in range1:
+            dues_tx[i].set_distance_d2d(pair_distance)
+            dues_rx[i].set_distance_d2d(pair_distance)
+        
+        gen.distribute_nodes(mues,self.bs)     # distribute nodes on the map
+        gen.distribute_pair_fixed_distance_multiple(dues_tx, dues_rx, self.bs) 
+
+        # set nodes distances to bs
+        for n in dues_tx+dues_rx:
+            n.set_distance_to_bs(spatial.distance.euclidean(n.position, self.bs.position))
+
+        # critical distance method
+        allocation_matrix = self.__critical_distance_allocation_matrix(mues, dues_tx, channel)
+        allocation_vector = self.__allocation_algorithm(allocation_matrix)
+
+        return np.sum(allocation_vector)/self.n_d2d
+
 
     def __run_multiple_pairs(self, pair_distances_list):
         lower_lim_uc = 10**(self.lower_lim_uc_db/10) # sinr lower bound for MUEs in dB
@@ -295,12 +328,12 @@ class system_simulation:
         for n in dues_tx+dues_rx:
             n.set_distance_to_bs(spatial.distance.euclidean(n.position, self.bs.position))
 
-        #TODO: calcular matriz de alocacao
         # critical distance method
         allocation_matrix = self.__critical_distance_allocation_matrix(mues, dues_tx, channel)
 
-        allocation_vector = self.allocation_algorithm(allocation_matrix)
+        allocation_vector = self.__allocation_algorithm(allocation_matrix)
         
+        # distances histogram stuff
         dues_indexes = np.where(allocation_vector==1)[0]        
         distances = [d.distance_d2d for d in np.array(dues_tx)[dues_indexes]]
         distances_indexes = np.array(list(), dtype='int32')
@@ -365,6 +398,21 @@ class system_simulation:
             aux = np.array(aux)    
             allocation_rates['d2d_dcrit'].append(np.sum(aux[:, 0])/n_loops)
             allocation_rates['d2d_sinr'].append(np.sum(aux[:, 1])/n_loops)
+        print(f'\nElapsed time: {timer() - start}')
+        return allocation_rates
+
+    def __run_loops_shitty_dist(self, n_loops, pair_distances_list):
+        start = timer()
+        allocation_rates = list()
+        for r in pair_distances_list:
+            aux=list()            
+            print(f'\nPair distance: {r}m out of {pair_distances_list[-1]}m')            
+            for j in range(int(n_loops)):
+                print(f'\r  Loop {j+1}/{n_loops}',end='', flush=True)                
+                rate_d2d_dcrit = self.__run_multiple_pairs_shitty_distribution(r)
+                aux.append(rate_d2d_dcrit)
+            aux = np.array(aux)    
+            allocation_rates.append(np.sum(aux)/n_loops)            
         print(f'\nElapsed time: {timer() - start}')
         return allocation_rates
 
